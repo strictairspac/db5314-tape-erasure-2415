@@ -34,6 +34,19 @@ class Hold(NamedTuple):
         return self.hold_until is None or self.hold_until >= cutoff
 
 
+class Amendment(NamedTuple):
+    """A date-bounded correction to a contract's retention association."""
+
+    contract_id: str
+    asset_id: str | None
+    hold_until: str | None
+    effective_from: str
+    effective_to: str | None
+
+
+OPEN_END = '9999-12-31'
+
+
 @dataclass
 class Catalog:
     assets: dict[str, Asset]
@@ -53,6 +66,73 @@ class Plan:
 
 class ErasureInvariantError(RuntimeError):
     pass
+
+
+def amendment_overlaps(left, right):
+    """True when two amendments correct the same contract over a shared date."""
+    if left.contract_id != right.contract_id:
+        return False
+    left_to = left.effective_to or OPEN_END
+    right_to = right.effective_to or OPEN_END
+    return left.effective_from <= right_to and right.effective_from <= left_to
+
+
+def first_overlapping(accepted, new):
+    """Index of the earliest accepted correction whose dates overlap ``new``.
+
+    ``accepted`` is an ordered list of existing corrections; the first overlap
+    is the winner that the newcomer must yield to. Returns ``None`` when the
+    newcomer may take effect alongside all of them.
+    """
+    for index, other in enumerate(accepted):
+        if amendment_overlaps(new, other):
+            return index
+    return None
+
+
+def retention_summary(catalog, cutoff):
+    """Describe which assets survive the check and why, for a stored batch.
+
+    Returns ``(rows, contracts)`` where each row carries the asset identity, the
+    retention reason and the contracts whose active hold reaches that asset
+    directly or through references. This is a review-side lookup over the stored
+    batch catalog; the exported execution evidence stays anonymized.
+    """
+    plan = plan_erasure(catalog, cutoff)
+    outgoing = {asset_id: set() for asset_id in catalog.assets}
+    for referrer, dependency in catalog.references:
+        outgoing[referrer].add(dependency)
+
+    def reachable(roots):
+        seen = set(roots)
+        pending = list(seen)
+        while pending:
+            for dependency in outgoing[pending.pop()] - seen:
+                seen.add(dependency)
+                pending.append(dependency)
+        return seen
+
+    protecting = defaultdict(set)
+    for hold in catalog.holds:
+        if hold.active_on(cutoff) and hold.asset_id in catalog.assets:
+            for asset_id in reachable([hold.asset_id]):
+                protecting[asset_id].add(hold.contract_id)
+
+    rows = []
+    for asset_id in sorted(catalog.assets.keys() - set(plan.deletion_order)):
+        if asset_id in plan.direct_holds:
+            reason = 'contract_hold'
+        elif asset_id in plan.held_dependencies:
+            reason = 'held_dependency'
+        elif catalog.assets[asset_id].kind == 'tape' and asset_id not in plan.due_tapes:
+            reason = 'tape_not_due'
+        elif asset_id in plan.candidates:
+            reason = 'still_referenced'
+        else:
+            reason = 'out_of_scope'
+        rows.append((asset_id, catalog.assets[asset_id], reason, sorted(protecting[asset_id])))
+    contracts = sorted({hold.contract_id for hold in catalog.holds if hold.active_on(cutoff)})
+    return rows, contracts
 
 
 def plan_erasure(catalog, cutoff):

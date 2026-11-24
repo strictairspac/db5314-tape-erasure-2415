@@ -16,7 +16,8 @@ export function runsPage(state, identity) {
     <dl><dt>启动时间</dt><dd>${esc(date(selected.started_at))}</dd><dt>完成时间</dt><dd>${esc(date(selected.finished_at))}</dd></dl>
     ${selected.error ? `<p class="error">${esc(selected.error)}</p>` : ''}
     ${active?'<p class="note">后台处理中，记录会自动刷新。</p>':''}
-    ${result?`<a class="button" href="#evidence/${result.id}">查看业务证据</a>`:''}` : '<h2>执行记录</h2><p>从档案创建一条执行记录后，可在此查看进度。</p>';
+    ${selected.status==='complete'?`<p class="actions"><a class="secondary" href="#retention/${selected.id}">复核当时留存</a>${result?`<a class="button" href="#evidence/${result.id}">查看业务证据</a>`:''}</p>`:''}
+    ${result&&selected.status!=='complete'?`<a class="button" href="#evidence/${result.id}">查看业务证据</a>`:''}` : '<h2>执行记录</h2><p>从档案创建一条执行记录后，可在此查看进度。</p>';
   const audit = state.audit.filter(x=>selected && x.reference===String(selected.id) && ['enqueue', 'complete', 'failed'].includes(x.action));
   return `${heading(topic.modules[2], `${state.spec.entity_labels[1]}与后台处理进度`, '<button class="secondary" type="button" id="refresh">刷新记录</button>')}
     <div class="spread"><section>${records(['档案','状态','经办','提交时间'], rows, '暂无执行记录。')}</section><aside class="brief">${detail}</aside></div>

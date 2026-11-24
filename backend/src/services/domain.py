@@ -3,8 +3,17 @@
 from datetime import date
 
 from .tape_erasure import (
-    KINDS, MIN_PERFORMERS, TRACKS, Asset, Catalog, Hold, apply_erasure, catalog_copy, plan_erasure,
+    KINDS, MIN_PERFORMERS, TRACKS, Asset, Catalog, Hold, apply_erasure, catalog_copy,
+    plan_erasure, retention_summary,
 )
+
+REASONS = {
+    'contract_hold': '合同留存',
+    'held_dependency': '受合同保护的依赖',
+    'tape_not_due': '样带未到期',
+    'still_referenced': '仍有留存引用',
+    'out_of_scope': '本批擦除范围外',
+}
 
 
 def _demo_tape(asset_id, object_key, expires_on, track, seconds, performer_id):
@@ -148,6 +157,60 @@ def _parse(payload):
 def validate(payload):
     cutoff, catalog = _parse(payload)
     plan_erasure(catalog, cutoff)
+
+
+def retention_view(payload):
+    """Review-side view of what a stored batch retained on its check date.
+
+    This is derived from the batch input snapshot, not from the exported
+    evidence, so it keeps replying about the same catalog even after the case
+    input is edited later. The evidence itself remains untouched.
+    """
+    cutoff, catalog = _parse(payload)
+    rows, contracts = retention_summary(catalog, cutoff)
+    return {
+        'cutoff': cutoff,
+        'contracts': contracts,
+        'assets': [
+            {
+                'asset_id': asset.asset_id,
+                'kind': KINDS[asset.kind],
+                'object_key': asset.object_key,
+                'reason': REASONS[reason],
+                'reason_code': reason,
+                'contracts': protecting,
+            }
+            for _, asset, reason, protecting in rows
+        ],
+    }
+
+
+def apply_amendments(payload, amendments, cutoff):
+    """Overlay date-effective contract corrections onto a batch snapshot.
+
+    Only the contract associations change; the asset directory and reference
+    edges stay exactly as recorded. A correction whose target asset is absent
+    from this batch is skipped and reported, so one batch never invents nodes.
+    """
+    asset_ids = {row['asset_id'] for row in payload['assets']}
+    holds = {(row['contract_id'], row['asset_id']): row['hold_until'] for row in payload['holds']}
+    applied, skipped = [], []
+    for item in amendments:
+        if item.effective_from > cutoff or (item.effective_to is not None and item.effective_to < cutoff):
+            continue
+        if item.asset_id not in asset_ids:
+            skipped.append(item)
+            continue
+        holds[(item.contract_id, item.asset_id)] = item.hold_until
+        applied.append(item)
+    if not applied:
+        return payload, applied, skipped
+    amended = dict(payload)
+    amended['holds'] = [
+        {'contract_id': contract_id, 'asset_id': asset_id, 'hold_until': hold_until}
+        for (contract_id, asset_id), hold_until in sorted(holds.items())
+    ]
+    return amended, applied, skipped
 
 
 def _retention_reason(asset_id, plan, before):

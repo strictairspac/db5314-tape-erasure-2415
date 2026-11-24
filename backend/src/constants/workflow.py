@@ -12,3 +12,8 @@ class Status(StrEnum):
     RUNNING = 'running'
     COMPLETE = 'complete'
     FAILED = 'failed'
+
+
+class AmendmentStatus(StrEnum):
+    ACCEPTED = 'accepted'
+    CONFLICT = 'conflict'

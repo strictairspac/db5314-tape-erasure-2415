@@ -29,11 +29,19 @@ docker compose up -d --build --wait
 
 | 账号 | 角色 | 能执行的操作 |
 |---|---|---|
-| `operator` | 经办员 | 读取档案、创建实验输入、提交执行、导出结果 |
-| `reviewer` | 复核员 | 读取、导出和签署结果 |
+| `operator` | 经办员 | 读取档案、创建实验输入、提交执行、补录合同更正、重算批次、导出结果 |
+| `reviewer` | 复核员 | 读取、导出和签署结果，复核旧批次留存 |
 | `viewer` | 观察员 | 读取、导出已有结果 |
 
 `SEED_DEMO=true` 启动时生成账号与一个业务样例。工作台新建档案会预填样例。可编辑表单中的数值、文本和结构化 JSON 后提交。业务说明中的原始文件是上游示例，演示数据通过表单录入。角色枚举位于后端 `src/constants/workflow.py` 与前端 `src/constants/workflow.js`。执行状态枚举也位于这两个文件，使用于队列、列表和执行详情。证据校验码是报告 JSON 按 UTF-8、键排序且省略多余空格序列化后的 SHA-256。
+
+### 复核、补录与重算
+
+- 每次执行入队时把当时的目录快照存入 `business_run_inputs`，之后的档案编辑不再改写这份快照。
+- `GET /runs/{id}/retention` 依据该快照返回检查日当时保住的素材、留存原因与保护合同；导出证据仍保持匿名化，原证据不因复核而改变。
+- `POST /amendments` 记录按日期段生效的合同更正（`contract_id`、`asset_id`、`hold_until`、`effective_from`、`effective_to`）。同一合同日期相交的更正先入账的一份生效，后到的记为 `conflict` 退回核对；不相交的各自入账。
+- `POST /runs/{id}/recompute` 用当时目录快照叠加已入账更正，在同一检查日生成新的执行批次与证据，原批次和原证据保持可查。
+- 更正与重算都接受 `Idempotency-Key` 请求头或 `request_key` 字段；重试相同 key 不重复入账，并返回第一次的入账时间。
 
 ## 工程结构
 

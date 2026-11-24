@@ -2,6 +2,36 @@ from sqlalchemy import (JSON, Column, ForeignKey, Integer, MetaData, String,
                         Table, Text)
 
 schema = MetaData()
+contract_locks = Table('contract_locks', schema,
+    Column('contract_id', String(64), primary_key=True))
+contract_amendments = Table('contract_amendments', schema,
+    Column('id', Integer, primary_key=True),
+    Column('contract_id', String(64), nullable=False, index=True),
+    Column('asset_id', String(64), nullable=False),
+    Column('hold_until', String(10)),
+    Column('effective_from', String(10), nullable=False),
+    Column('effective_to', String(10)),
+    Column('status', String(20), nullable=False, index=True),
+    Column('request_key', String(128), nullable=False, unique=True),
+    Column('actor', String(40), nullable=False),
+    Column('created_at', String(32), nullable=False),
+    Column('conflict_with', Integer),
+    Column('note', String(500)))
+run_recomputations = Table('run_recomputations', schema,
+    Column('id', Integer, primary_key=True),
+    Column('source_run_id', ForeignKey('business_runs.id'), nullable=False, index=True),
+    Column('result_run_id', ForeignKey('business_runs.id'), nullable=False, unique=True),
+    Column('cutoff', String(10), nullable=False),
+    Column('request_key', String(128), nullable=False, unique=True),
+    Column('actor', String(40), nullable=False),
+    Column('created_at', String(32), nullable=False))
+run_amendments = Table('run_amendments', schema,
+    Column('id', Integer, primary_key=True),
+    Column('run_id', ForeignKey('business_runs.id'), nullable=False, index=True),
+    Column('amendment_id', ForeignKey('contract_amendments.id'), nullable=False))
+run_inputs = Table('business_run_inputs', schema,
+    Column('run_id', ForeignKey('business_runs.id'), primary_key=True),
+    Column('payload', JSON, nullable=False))
 users = Table('accounts', schema,
     Column('id', Integer, primary_key=True),
     Column('username', String(40), nullable=False, unique=True),
